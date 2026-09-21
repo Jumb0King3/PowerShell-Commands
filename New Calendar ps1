@@ -166,21 +166,26 @@ function Find-CalendarByName {
 
     # Re-resolve the folder via Get-MailboxFolder to get its real Identity, rather than
     # constructing "Owner:\FolderPath" by hand - Exchange doesn't reliably accept a
-    # hand-built identity for folder names containing spaces. Match on Name (consistent
-    # between Get-MailboxFolderStatistics and Get-MailboxFolder) rather than FolderPath
-    # (which the two cmdlets format differently - with/without a leading slash).
+    # hand-built identity for folder names containing spaces.
+    #
+    # NOTE: Get-MailboxFolderStatistics -FolderScope Calendar reports FolderPath RELATIVE
+    # TO THE CALENDAR FOLDER, not the mailbox root - e.g. a sub-calendar physically at
+    # "Calendar\Room Geordie" is reported as just "/Room Geordie". That makes FolderPath
+    # from this cmdlet useless for rebuilding a real identity, so match on Name instead
+    # (which both cmdlets report the same way), scoped to actual calendar folders via
+    # FolderClass so a same-named non-calendar folder elsewhere in the mailbox can't match.
     try {
         $ownerFolders = Get-MailboxFolder -Identity "$($chosen.Owner):\" -Recurse -ErrorAction Stop
-        $resolved = $ownerFolders | Where-Object { $_.Name -eq $chosen.Name -and $_.FolderClass -eq "IPF.Appointment" } | Select-Object -First 1
-        if (-not $resolved) {
-            # Fall back to a FolderPath comparison (normalized) in case of duplicate names
-            $folderPathForMatch = (($chosen.FolderPath -replace '/', '\').TrimStart('\'))
-            $resolved = $ownerFolders | Where-Object { (($_.FolderPath -replace '/', '\').TrimStart('\')) -eq $folderPathForMatch } | Select-Object -First 1
-        }
-        if (-not $resolved) {
+        $candidates = $ownerFolders | Where-Object { $_.Name -eq $chosen.Name -and $_.FolderClass -eq "IPF.Appointment" }
+
+        if (-not $candidates) {
             Write-Host "Error: Could not re-resolve the selected calendar's identity." -ForegroundColor Red
             return $null
         }
+        if (@($candidates).Count -gt 1) {
+            Write-Host "Warning: Multiple calendars named '$($chosen.Name)' found for $($chosen.Owner) - using the first match." -ForegroundColor Yellow
+        }
+        $resolved = $candidates | Select-Object -First 1
         return $resolved.Identity.ToString()
     }
     catch {
