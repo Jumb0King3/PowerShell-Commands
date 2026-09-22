@@ -194,6 +194,43 @@ function Find-CalendarByName {
     }
 }
 
+# --- Function: list Room Mailboxes and let the user pick one ---
+# Room mailboxes use a plain, un-nested "Calendar" folder, so unlike a person's mailbox
+# (which can have sub-calendars) there's no need to browse or resolve anything - the
+# identity is always simply "mailbox:\Calendar".
+function Select-RoomMailbox {
+    try {
+        $roomMailboxes = Get-Mailbox -RecipientTypeDetails RoomMailbox -ResultSize Unlimited -ErrorAction Stop | Sort-Object DisplayName
+    }
+    catch {
+        Write-Host "Error: Could not retrieve room mailboxes. $($_.Exception.Message)" -ForegroundColor Red
+        return $null
+    }
+
+    if (-not $roomMailboxes) {
+        Write-Host "No room mailboxes found." -ForegroundColor Yellow
+        return $null
+    }
+
+    Write-Host "`nRoom mailboxes :" -ForegroundColor Cyan
+    $i = 1
+    $indexed = @{}
+    foreach ($room in $roomMailboxes) {
+        Write-Host "  $i. $($room.DisplayName)  -  $($room.PrimarySmtpAddress)"
+        $indexed[$i] = $room
+        $i++
+    }
+
+    $selection = Read-Host "`nEnter the number of the room to use (press Enter with no input to skip)"
+    if ([string]::IsNullOrWhiteSpace($selection) -or -not $indexed.ContainsKey([int]$selection)) {
+        Write-Host "No valid selection made. Skipping." -ForegroundColor Yellow
+        return $null
+    }
+    $chosen = $indexed[[int]$selection]
+
+    return "$($chosen.PrimarySmtpAddress):\Calendar"
+}
+
 # --- Main menu loop ---
 $keepGoing = $true
 
@@ -214,7 +251,8 @@ while ($keepGoing) {
     Write-Host "`nHow do you want to locate the calendar?" -ForegroundColor Cyan
     Write-Host "  1. Enter the mailbox owner's email"
     Write-Host "  2. Search by calendar name across all mailboxes (e.g. a room/resource calendar)"
-    $lookupMethod = Read-Host "`nEnter 1 or 2 (press Enter with no input to exit)"
+    Write-Host "  3. Select a Room Mailbox (list of room mailboxes and their main Calendar)"
+    $lookupMethod = Read-Host "`nEnter 1, 2, or 3 (press Enter with no input to exit)"
     if ([string]::IsNullOrWhiteSpace($lookupMethod)) {
         Write-Host "No option entered. Exiting." -ForegroundColor Yellow
         break
@@ -237,6 +275,9 @@ while ($keepGoing) {
         }
         Write-Host "`nSearching all mailboxes for calendars matching '$searchText' - this can take a while on larger tenants..." -ForegroundColor Cyan
         $calendarIdentity = Find-CalendarByName -searchText $searchText
+    }
+    elseif ($lookupMethod -eq "3") {
+        $calendarIdentity = Select-RoomMailbox
     }
     else {
         Write-Host "Invalid option entered." -ForegroundColor Yellow
